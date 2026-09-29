@@ -2,6 +2,8 @@
 
 DSH Web 的紧凑 Git 状态插件，参考 ccstatusline-zh 的 Git widgets。显示位置可在设置页切换：侧边栏底部（默认）、会话顶部标题后方、对话框上方、对话框下方，或关闭。
 
+要求 DSH `>=0.2.0-rc.1 <0.3.0`（本仓库 0.2.1 起）。0.1.x 请用 `v0.2.0` 或更早的 tag。
+
 显示格式：
 
 ```text
@@ -28,9 +30,22 @@ main (+16,-2) ↑2 ↓1
 
 > “对话框下方”与 DSH 内置的用量统计、上下文占比同处一行且宽度预算很紧：实测带边框 chip 会把那一行挤到省略号，所以该位置改用无边框纯文本。若在意那一行，建议选“会话顶部标题后方”。
 
+## 兼容性
+
+DSH 启动时会校验插件 `package.json` 中所有 `@deepseek-ai/dsh*` peer 的版本范围是否覆盖当前运行时版本；不覆盖就打印 `skipping profile bundle` 并**静默跳过整个插件**，界面上不会有任何报错。
+
+因此本插件的 peer 范围跟随 DSH 的次版本线：
+
+| DSH 版本线 | 可用插件版本 |
+| --- | --- |
+| `>=0.2.0-rc.1 <0.3.0` | 0.2.1 起 |
+| `0.1.x` | 0.2.0（注入的是已删除的 `@deepseek-ai/dsh-client-runtime`，在 0.2.x 上会被跳过） |
+
+`npm test` 里有一组兼容性回归测试，会直接调用 DSH 自己的 `evaluatePluginCompatibility`（来自 `@deepseek-ai/dsh-app-boot`）复现这道闸门，并检查 `dsh.client.inject` 的每一项在已安装的 DSH 里都是真实可注入的 Web 客户端模块——避免再次出现「升级 DSH 后插件凭空消失」。找不到 DSH 安装时该组测试自动跳过（可用 `DSH_INSTALL_DIR` 指定）。
+
 ## 安装
 
-① ② 在 DSH + pnpm 11.21.0 上实测通过，③ 安装的是同一份预构建代码。插件是纯 JavaScript，`lib/` 已随仓库提交，**不需要任何构建步骤，也不会触发 pnpm 的构建授权提示**。
+① ② ③ 在 DSH 0.2.0-rc.1 + pnpm 11.21.0 上实测通过，③ 安装的是同一份预构建代码。插件是纯 JavaScript，`lib/` 已随仓库提交，**不需要任何构建步骤，也不会触发 pnpm 的构建授权提示**。
 
 **① 从 GitHub 直接安装（推荐）**
 
@@ -52,7 +67,7 @@ curl -L -o dsh-git-statusline.tgz \
 dsh plugin --profile web add ./dsh-git-statusline.tgz
 ```
 
-> 该资产名不含版本号，`releases/latest/download/` 会随最新 Release 走，因此不需要在每次发版后改这个链接。想固定版本就用钉住 tag 的形式：`.../releases/download/v0.2.0/dsh-git-statusline.tgz`。
+> 该资产名不含版本号，`releases/latest/download/` 会随最新 Release 走，因此不需要在每次发版后改这个链接。想固定版本就用钉住 tag 的形式：`.../releases/download/v0.2.1/dsh-git-statusline.tgz`。
 
 安装后重启 `dsh web`。如果 Web 服务由其他进程管理，重启该进程并刷新 `http://127.0.0.1:3080`。
 
@@ -62,7 +77,7 @@ dsh plugin --profile web add ./dsh-git-statusline.tgz
 dsh --profile web --dump-config | grep -A2 dsh-git-statusline
 ```
 
-应能看到 `# == dsh-git-statusline` 这一层。
+应能看到 `# == dsh-git-statusline` 这一层。若同时出现 `dsh: skipping profile bundle "dsh-git-statusline"`，说明 peer 版本范围不覆盖当前 DSH —— 升级插件或按上面的「兼容性」一节处理。
 
 卸载：
 
@@ -73,12 +88,12 @@ dsh plugin --profile web remove dsh-git-statusline
 ## 验证
 
 ```bash
-node --test        # 在本目录执行：4 个测试
+node --test        # 在本目录执行：8 个测试（4 个 Git 解析 + 4 个兼容性回归）
 ```
 
 插件每 5 秒固定轮询一次，并在窗口重新获得焦点时立即刷新。同一时刻最多一个进行中的请求（客户端并发去重）。Git 命令均为只读操作，设置 `GIT_OPTIONAL_LOCKS=0`。
 
-> **不显示时的排查顺序**：① 当前会话的工作目录不是 git 仓库（`isRepo=false`，插件按设计隐藏）；② DSH 版本。`0.1.6-alpha.2` 起 `sessions.list` 的列表快照不再带 `current`/`currentAddress`，当前会话改由 `uiSession` 服务的 `current` 绑定源暴露（值形如 `{ key: sessionId }`）；`lib/client.js` 优先读该绑定源，缺失时回退到旧版的 `list.current`。若升级 DSH 后状态栏消失，先确认浏览器 Network 里是否还有 `POST /git-statusline/status`——有请求但无渲染即属于情况 ①。
+> **不显示时的排查顺序**：⓪ **插件层是否被跳过**——跑一次 `dsh --profile web --dump-config | grep -A2 dsh-git-statusline`，看不到 `# == dsh-git-statusline` 或同时出现 `skipping profile bundle` 就是 peer 版本不兼容（升级 DSH 后最常见的静默失效原因，见「兼容性」）；① 当前会话的工作目录不是 git 仓库（`isRepo=false`，插件按设计隐藏）；② 插槽位置选了「不显示」。若浏览器 Network 里根本没有 `POST /git-statusline/status`，基本可判定为 ⓪ 或 ②；有请求却无渲染则是 ①。当前会话来源：`0.2.x` 的 `sessions.list` 快照不带 `current`，当前会话由 `uiSession` 服务的 `current` 绑定源暴露（值形如 `{ key: sessionId }`），`lib/client.js` 优先读该绑定源，`list.current` 仅作防御性兜底。
 
 > **为什么 5 秒轮询不烧 CPU**：服务端每次请求先做 mtime 预检（stat `.git/HEAD` 与 `.git/index`，毫秒级）——工作区未变直接命中缓存，**连 git 进程都不拉起**；只有 index/HEAD 变化（如 git add/commit）才真正执行 git。因此轮询本身成本几乎为零，无需事件驱动或长间隔。
 
